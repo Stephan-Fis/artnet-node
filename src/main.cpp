@@ -6,16 +6,13 @@
 #include <Preferences.h>
 
 // Anzahl der LEDs pro Board
-#define NUM_LEDS_PER_BOARD 32
-#define numBoards 5
-
-// GPIO für alle LEDs
+#define NUM_LEDS_PER_BOARD 32 // 32 LEDs pro Board (16 gespiegelt + 16 normal)
 #define LED_PIN 4 // Ein einziger Pin für alle LEDs
-#define wiederholungen 2 // Anzahl der Wiederholungen für die ersten 5 Boards
+#define wiederholungen 5 // Anzahl der Wiederholungen für die ersten 5 Boards
 
 
 // Gesamtanzahl der LEDs (alle Boards zusammen)
-#define TOTAL_LEDS (NUM_LEDS_PER_BOARD * numBoards + 40) // 40 LEDs für das zusätzliche Board
+#define TOTAL_LEDS (NUM_LEDS_PER_BOARD * wiederholungen + 40) // 40 LEDs für das zusätzliche Board
 
 
 
