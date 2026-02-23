@@ -2,6 +2,8 @@
 #include <ETH.h>
 #include <ArtnetWifi.h>
 #include <ArduinoOTA.h>
+#include <WebServer.h>
+#include <Preferences.h>
 
 // Anzahl der LEDs pro Board
 #define NUM_LEDS_PER_BOARD 32
@@ -9,7 +11,7 @@
 
 // GPIO für alle LEDs
 #define LED_PIN 4 // Ein einziger Pin für alle LEDs
-#define wiederholungen 3 // Anzahl der Wiederholungen für die ersten 5 Boards
+#define wiederholungen 2 // Anzahl der Wiederholungen für die ersten 5 Boards
 
 
 // Gesamtanzahl der LEDs (alle Boards zusammen)
@@ -22,6 +24,8 @@ CRGB leds[TOTAL_LEDS];
 
 // Art-Net-Objekt
 ArtnetWifi artnet;
+
+Preferences preferences;
 
 // Ethernet-Event-Handler
 void WiFiEvent(WiFiEvent_t event) {
@@ -47,6 +51,77 @@ void WiFiEvent(WiFiEvent_t event) {
       break;
   }
 }
+
+// Standardwerte für Timeout, Farbe und Helligkeit
+unsigned long artnetTimeout = 2000; // 2 Sekunden
+CRGB defaultColor = CRGB::Blue;
+uint8_t brightness = 128; // 50% Helligkeit
+
+unsigned long lastArtNetPacket = 0; // Zeitstempel des letzten Art-Net-Pakets
+
+// Funktion, um LEDs auf die Standardfarbe zu setzen
+void setAllToDefaultColor() {
+    for (int i = 0; i < TOTAL_LEDS; i++) {
+        leds[i] = defaultColor;
+    }
+    FastLED.setBrightness(brightness);
+    FastLED.show();
+}
+
+// Webserver auf Port 80
+WebServer server(80);
+
+// Webinterface-Handler
+void handleRoot() {
+    String html = "<html><body>";
+    html += "<h1>LED Controller</h1>";
+    html += "<form action='/update' method='POST'>";
+    html += "Timeout (ms): <input type='number' name='timeout' value='" + String(artnetTimeout) + "'><br>";
+    html += "Farbe: <input type='color' name='color' value='#" + String(defaultColor.r, HEX) + String(defaultColor.g, HEX) + String(defaultColor.b, HEX) + "'><br>";
+    html += "Helligkeit: <input type='number' name='brightness' value='" + String(brightness) + "'><br>";
+    html += "<input type='submit' value='Update' onclick='window.location.reload()'>";
+    html += "</form></body></html>";
+    server.send(200, "text/html", html);
+}
+
+// Funktion, um Werte aus dem Speicher zu laden
+void loadPreferences() {
+    preferences.begin("led-config", true); // Nur-Lese-Modus
+    artnetTimeout = preferences.getULong("timeout", 2000); // Standardwert 2000 ms
+    uint32_t color = preferences.getUInt("color", 0x0000FF); // Standardwert Blau
+    defaultColor = CRGB((color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF);
+    brightness = preferences.getUChar("brightness", 128); // Standardwert 50%
+    preferences.end();
+}
+
+// Funktion, um Werte im Speicher zu speichern
+void savePreferences() {
+    preferences.begin("led-config", false); // Schreib-Modus
+    preferences.putULong("timeout", artnetTimeout);
+    uint32_t color = (defaultColor.r << 16) | (defaultColor.g << 8) | defaultColor.b;
+    preferences.putUInt("color", color);
+    preferences.putUChar("brightness", brightness);
+    preferences.end();
+}
+
+// Webinterface-Handler aktualisieren
+void handleUpdate() {
+    if (server.hasArg("timeout")) {
+        artnetTimeout = server.arg("timeout").toInt();
+    }
+    if (server.hasArg("color")) {
+        String color = server.arg("color");
+        long hexColor = strtol(color.c_str() + 1, NULL, 16);
+        defaultColor = CRGB((hexColor >> 16) & 0xFF, (hexColor >> 8) & 0xFF, hexColor & 0xFF);
+    }
+    if (server.hasArg("brightness")) {
+        brightness = server.arg("brightness").toInt();
+    }
+    savePreferences(); // Änderungen speichern
+    server.send(200, "text/plain", "Updated");
+}
+
+
 
 void setup() {
   // Serielle Kommunikation deaktivieren, um Pins 1 und 3 zu verwenden
@@ -98,15 +173,31 @@ void setup() {
   // Art-Net initialisieren
   artnet.begin();
   Serial.println("Art-Net gestartet!");
+
+  // Webserver konfigurieren
+  server.on("/", handleRoot);
+  server.on("/update", HTTP_POST, handleUpdate);
+  server.begin();
+  Serial.println("Webserver gestartet");
 }
 
 void loop() {
   // OTA-Handler
   ArduinoOTA.handle();
 
+  // Art-Net Timeout prüfen
+  if (millis() - lastArtNetPacket > artnetTimeout) {
+    setAllToDefaultColor();
+  }
+
+  // Webserver-Handler
+  server.handleClient();
+
   // Art-Net-Daten empfangen
   int packetSize = artnet.read();
   if (packetSize) {
+    lastArtNetPacket = millis(); // Zeitstempel aktualisieren
+
     // DMX-Daten auslesen
     uint8_t* dmxData = artnet.getDmxFrame();
 
