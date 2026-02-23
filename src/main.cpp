@@ -4,14 +4,21 @@
 #include <ArduinoOTA.h>
 
 // Anzahl der LEDs pro Board
-#define NUM_LEDS_PER_BOARD 24
+#define NUM_LEDS_PER_BOARD 32
+#define numBoards 5
 
-// GPIOs für die Daughterboards
-const int boardPins[] = {2, 4, 12, 14, 15};
-const int numBoards = sizeof(boardPins) / sizeof(boardPins[0]);
+// GPIO für alle LEDs
+#define LED_PIN 4 // Ein einziger Pin für alle LEDs
+#define wiederholungen 3 // Anzahl der Wiederholungen für die ersten 5 Boards
 
-// LED-Arrays für jedes Board
-CRGB leds[numBoards][NUM_LEDS_PER_BOARD];
+
+// Gesamtanzahl der LEDs (alle Boards zusammen)
+#define TOTAL_LEDS (NUM_LEDS_PER_BOARD * numBoards + 40) // 40 LEDs für das zusätzliche Board
+
+
+
+// LED-Array für alle LEDs
+CRGB leds[TOTAL_LEDS];
 
 // Art-Net-Objekt
 ArtnetWifi artnet;
@@ -42,16 +49,13 @@ void WiFiEvent(WiFiEvent_t event) {
 }
 
 void setup() {
+  // Serielle Kommunikation deaktivieren, um Pins 1 und 3 zu verwenden
   // Serielle Ausgabe für Debugging
   Serial.begin(115200);
   Serial.println("Starte WT32-ETH01 mit Ethernet...");
 
-  // FastLED-Controller für jedes Board initialisieren
-  FastLED.addLeds<WS2812, 2, GRB>(leds[0], NUM_LEDS_PER_BOARD);
-  FastLED.addLeds<WS2812, 4, GRB>(leds[1], NUM_LEDS_PER_BOARD);
-  FastLED.addLeds<WS2812, 12, GRB>(leds[2], NUM_LEDS_PER_BOARD);
-  FastLED.addLeds<WS2812, 14, GRB>(leds[3], NUM_LEDS_PER_BOARD);
-  FastLED.addLeds<WS2812, 15, GRB>(leds[4], NUM_LEDS_PER_BOARD);
+  // FastLED-Controller für alle LEDs initialisieren
+  FastLED.addLeds<WS2812, LED_PIN, GRB>(leds, TOTAL_LEDS);
 
   // Ethernet initialisieren
   WiFi.onEvent(WiFiEvent);
@@ -106,14 +110,32 @@ void loop() {
     // DMX-Daten auslesen
     uint8_t* dmxData = artnet.getDmxFrame();
 
-    // LEDs für jedes Board basierend auf den DMX-Daten steuern
-    for (int board = 0; board < numBoards; board++) {
-      int startChannel = board * NUM_LEDS_PER_BOARD * 3 + 1;  // 3 Kanäle pro LED (R, G, B), Start bei Kanal 1
-      for (int i = 0; i < NUM_LEDS_PER_BOARD; i++) {
-        int channelIndex = startChannel + (i * 3) - 1; // -1, da DMX-Kanäle bei 1 beginnen
-        leds[board][i] = CRGB(dmxData[channelIndex], dmxData[channelIndex + 1], dmxData[channelIndex + 2]);
-      }
-      FastLED.show();
+    // LEDs basierend auf den DMX-Daten steuern
+    int offset = 0;
+    // Muster 5-mal wiederholen
+    for (int repeat = 0; repeat < wiederholungen; repeat++) {
+        // LEDs 1-8 gespiegelt mit LEDs 9-16 (DMX 1-24 pro Wiederholung)
+        for (int i = 0; i < 8; i++) {
+            int channelIndex = (repeat * 72) + (i * 3); // 72 Kanäle pro Wiederholung, 3 Kanäle pro LED
+            leds[offset + i] = CRGB(dmxData[channelIndex], dmxData[channelIndex + 1], dmxData[channelIndex + 2]);
+            leds[offset + 15 - i] = leds[offset + i]; // Spiegelung
+        }
+        offset += 16; // Weiter zu den nächsten LEDs
+
+        // LEDs 17-32 "normal" (DMX 25-72 pro Wiederholung)
+        for (int i = 0; i < 16; i++) {
+            int channelIndex = (repeat * 72) + 24 + (i * 3); // Start bei DMX 25 pro Wiederholung
+            leds[offset + i] = CRGB(dmxData[channelIndex], dmxData[channelIndex + 1], dmxData[channelIndex + 2]);
+        }
+        offset += 16; // Weiter zur nächsten Wiederholung
     }
+
+    // 40 einzelne LEDs "normal" steuern
+    for (int i = 0; i < 40; i++) {
+        int channelIndex = ((wiederholungen) * 72) + (i * 3); // Start bei DMX 361 nach den 5 Wiederholungen
+        leds[offset + i] = CRGB(dmxData[channelIndex], dmxData[channelIndex + 1], dmxData[channelIndex + 2]);
+    }
+
+    FastLED.show();
   }
 }
